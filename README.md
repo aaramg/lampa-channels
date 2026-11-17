@@ -17,9 +17,7 @@ Settings → Channels turns each menu item on or off.
 Install: Settings → Extensions → Add plugin →
 
 ```
-https://aaramg.github.io/lampa-disney/channels.js
+https://aaramg.github.io/lampa-channels/channels.js
 ```
-
-The older address, `disney.js`, still works: it loads `channels.js`.
 
 Built for Lampa 3.x and written in ES5, so it runs on older Android TV WebViews.

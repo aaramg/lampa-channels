@@ -359,14 +359,14 @@
     }
 
     // A plugin added by URL in Settings → Extensions has no name and shows as "Untitled".
-    // Name our entry; it may still be installed under the older disney.js address.
+    // Name our entry.
     function nameSelf() {
         if (!Lampa.Plugins || !Lampa.Plugins.get) return;
 
         var changed = false;
 
         Lampa.Plugins.get().forEach(function (plugin) {
-            if (plugin.url && /\/(channels|disney)\.js(\?|$)/.test(plugin.url) && plugin.name !== 'Channels') {
+            if (plugin.url && /\/channels\.js(\?|$)/.test(plugin.url) && plugin.name !== 'Channels') {
                 plugin.name = 'Channels';
                 plugin.author = '@aaramg';
                 changed = true;
