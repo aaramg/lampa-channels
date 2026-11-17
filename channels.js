@@ -13,6 +13,8 @@
 
     var SOURCE = 'channels';
     var DAY = 1000 * 60 * 60 * 24;
+    // Lampa's request cache measures a cached answer's life in minutes.
+    var MINUTES_PER_DAY = 60 * 24;
 
     // TMDB has no streaming catalog for Armenia, so "on <service> now" rows read the US catalog.
     var CATALOG_REGION = 'US';
@@ -270,7 +272,7 @@
                 tmdb.get(row[1], {}, function (json) {
                     json.title = Lampa.Lang.translate(rowKey(brand, index));
                     call(json);
-                }, call, { life: DAY * row[2] });
+                }, call, { life: MINUTES_PER_DAY * row[2] });
             };
         });
 
