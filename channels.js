@@ -212,7 +212,8 @@
         var size = text.length > 2 ? 8 : text.length > 1 ? 11 : 16;
 
         return '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">' +
-            '<rect x="1" y="1" width="22" height="22" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>' +
+            // The frame is a filled ring, not a stroke: the menu fills a highlighted icon's shapes.
+            '<path fill="currentColor" fill-rule="evenodd" d="M6 1h12a5 5 0 0 1 5 5v12a5 5 0 0 1-5 5H6a5 5 0 0 1-5-5V6a5 5 0 0 1 5-5zm0 2a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h12a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3z"/>' +
             '<text x="12" y="12" dy=".35em" text-anchor="middle" font-family="Arial, sans-serif" font-weight="bold" font-size="' + size + '" fill="currentColor">' + text + '</text>' +
             '</svg>';
     }
