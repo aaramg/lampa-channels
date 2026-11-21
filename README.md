@@ -1,3 +1,14 @@
+# Lampa plugins by @aaramg
+
+**Everything at once:** Settings → Extensions → Add plugin →
+
+```
+is.gd/lampar
+```
+
+That short link points to `all.js`, which loads every plugin below; plugins added there later reach
+everyone on their next Lampa start. Or install a plugin on its own with its link below.
+
 # Channels plugin for Lampa
 
 Adds side-menu items for streaming brands. Each opens a page of TMDB rows:
