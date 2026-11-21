@@ -912,10 +912,12 @@
         if (query.search) return searchPage(query.search, page, finish);
 
         // Lampa counts its own pages; the site pages already read are remembered on the activity.
+        // Lampa keeps the first answer's total_pages for good (category next.js), so that must be
+        // the site's real page count; pages past the end answer quickly with nothing.
         queryPages(query, Math.max(page, params.hf_next || 1), function (answer) {
             params.hf_next = answer.last + 1;
 
-            finish({ results: answer.results, page: page, total_pages: answer.last < answer.total ? page + 1 : page });
+            finish({ results: answer.results, page: page, total_pages: Math.max(answer.total, page) });
         });
     }
 
