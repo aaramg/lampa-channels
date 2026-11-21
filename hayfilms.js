@@ -561,11 +561,48 @@
         });
     }
 
-    // Every title filed under a grown-up genre, read once (all pages) and kept for CACHE_MS.
-    var grownUp = { ids: {}, time: 0 };
+    // Every title filed under a grown-up genre. Reading them all takes some 35 pages, so the set is
+    // stored on the device; a stale set is used at once and refreshed in the background.
+    var GROWN_UP_KEY = 'hayfilms_grown_up';
+    var GROWN_UP_LIFE = 1000 * 60 * 60 * 24 * 3;
+    var grownUp = storedGrownUp();
+    var grownUpLoading = false;
+
+    function storedGrownUp() {
+        var stored = Lampa.Storage.get(GROWN_UP_KEY, '{}') || {};
+        var ids = {};
+
+        if (typeof stored === 'string') {
+            try { stored = JSON.parse(stored); } catch (e) { stored = {}; }
+        }
+
+        (stored.ids || []).forEach(function (id) { ids[id] = true; });
+
+        return { ids: ids, time: stored.time || 0 };
+    }
+
+    function grownUpReady() {
+        return grownUp.time > 0;
+    }
+
+    var grownUpWaiting = [];
+
+    // First run on a device: the family list has to wait for the set once.
+    function waitGrownUp(done) {
+        grownUpWaiting.push(done);
+
+        loadGrownUp(function () {
+            var waiting = grownUpWaiting;
+
+            grownUpWaiting = [];
+            waiting.forEach(function (call) { call(); });
+        });
+    }
 
     function loadGrownUp(done) {
-        if (Date.now() - grownUp.time < CACHE_MS) return done();
+        if (grownUpLoading) return;
+
+        grownUpLoading = true;
 
         var ids = {};
 
@@ -591,7 +628,11 @@
             };
         }), function () {
             grownUp = { ids: ids, time: Date.now() };
-            done();
+            grownUpLoading = false;
+
+            Lampa.Storage.set(GROWN_UP_KEY, { ids: Object.keys(ids).map(Number), time: grownUp.time });
+
+            if (done) done();
         });
     }
 
@@ -605,8 +646,10 @@
         var total = 0;
         var page = from;
 
-        if (query.family && Date.now() - grownUp.time >= CACHE_MS) {
-            return loadGrownUp(function () { queryPages(query, from, done); });
+        if (query.family && Date.now() - grownUp.time >= GROWN_UP_LIFE) {
+            if (!grownUpReady()) return waitGrownUp(function () { queryPages(query, from, done); });
+
+            loadGrownUp();
         }
 
         function read() {
