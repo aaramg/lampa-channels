@@ -1069,13 +1069,62 @@
                 else if (/^https?:/.test(part)) map['720p'] = part;
             });
 
-            var stream = withQualities(map);
+            var labels = Object.keys(map);
 
-            if (!stream) return fail();
+            if (!labels.length) return fail();
 
-            stream.no_referrer = true;
-            done(stream);
+            gather(labels.map(function (label) {
+                return function (call) {
+                    directUrl(map[label], function (direct) {
+                        map[label] = direct;
+                        call();
+                    });
+                };
+            }), function () {
+                var stream = withQualities(map);
+
+                stream.no_referrer = true;
+                done(stream);
+            });
         }, fail);
+    }
+
+    // An incvideo link is https and redirects to its CDN host. VLC on Android TV restarts its
+    // player while starting (twice when an app opens it for a result, as ByLampa does), which
+    // cuts that slow TLS-plus-redirect connection, so VLC gives up. The CDN serves the same
+    // file over plain http for hours, so on Android we follow the redirect ourselves and hand
+    // players that final http link, which opens as fast as a TorrServe one. Any failure keeps
+    // the original link.
+    function directUrl(url, done) {
+        if (!Lampa.Platform.is('android')) return done(url);
+
+        var network = new Lampa.Reguest();
+        var finished = false;
+        var finish = function (result) {
+            if (finished) return;
+
+            finished = true;
+            done(result);
+        };
+
+        network.timeout(10000);
+        network.native(url, function (response) {
+            var data = response;
+
+            if (typeof data === 'string') {
+                try { data = JSON.parse(data); } catch (e) { data = null; }
+            }
+
+            var current = data && typeof data === 'object' ? data.currentUrl : '';
+
+            if (current && /^https?:\/\//.test(current) && current !== url) finish(current.replace(/^https:/, 'http:'));
+            else finish(url);
+        }, function () {
+            finish(url);
+        }, false, {
+            returnHeaders: true,
+            headers: { Range: 'bytes=0-0' }
+        });
     }
 
     function resolveArmdb(url, done, fail) {
