@@ -914,7 +914,13 @@
         // Lampa counts its own pages; the site pages already read are remembered on the activity.
         // Lampa keeps the first answer's total_pages for good (category next.js), so that must be
         // the site's real page count; pages past the end answer quickly with nothing.
-        queryPages(query, Math.max(page, params.hf_next || 1), function (answer) {
+        // Scrolling asks for the next page; the page picker jumps (same object, page set directly),
+        // and then we start reading at the chosen page.
+        var from = params.hf_page !== undefined && page === params.hf_page + 1 ? Math.max(page, params.hf_next || 1) : page;
+
+        params.hf_page = page;
+
+        queryPages(query, from, function (answer) {
             params.hf_next = answer.last + 1;
 
             finish({ results: answer.results, page: page, total_pages: Math.max(answer.total, page) });
