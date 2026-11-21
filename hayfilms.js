@@ -747,6 +747,26 @@
         read();
     }
 
+    // The site also matches descriptions ("Հարրի" finds films that mention Harry), newest first;
+    // put the titles that contain the words first, keeping the site's order otherwise.
+    function rankByTitle(cards, text) {
+        var words = text.toLowerCase().split(/\s+/).filter(function (word) { return word.length > 1; });
+
+        function score(card) {
+            var title = (card.title + ' ' + card.original_title).toLowerCase();
+            var hits = 0;
+
+            words.forEach(function (word) { if (title.indexOf(word) >= 0) hits++; });
+
+            return hits;
+        }
+
+        return cards
+            .map(function (card, index) { return { card: card, score: score(card), index: index }; })
+            .sort(function (a, b) { return b.score - a.score || a.index - b.index; })
+            .map(function (entry) { return entry.card; });
+    }
+
     function searchPage(text, page, done) {
         var url = SITE + '/index.php?do=search&subaction=search&story=' + encodeURIComponent(text) +
             (page > 1 ? '&search_start=' + page + '&result_from=' + ((page - 1) * PER_PAGE + 1) : '');
@@ -754,7 +774,7 @@
         fetchText(url, function (html) {
             var doc = parseHtml(html);
 
-            done({ results: parseCards(doc), page: page, total_pages: parseTotalPages(doc) });
+            done({ results: rankByTitle(parseCards(doc), text), page: page, total_pages: parseTotalPages(doc) });
         }, function () {
             done({ results: [], page: page, total_pages: 0 });
         });
@@ -1376,6 +1396,74 @@
         if (changed) Lampa.Plugins.save();
     }
 
+    /* ---------- Armenian keyboard ---------- */
+
+    // Phonetic layout, like the Armenian phonetic keyboard on phones; all 38 letters and և.
+    var ARMENIAN_ROWS = [
+        'է թ փ ձ ջ ր չ ճ ժ ծ',
+        'ք ո ե ռ տ ը ւ ի օ պ խ',
+        'ա ս դ ֆ գ հ յ կ լ շ',
+        'զ ղ ց վ բ ն մ և .'
+    ];
+
+    // Lampa's keyboard takes its layouts from a list we can't reach, but it builds a fresh
+    // SimpleKeyboard each time; wrapping that class lets us add "hy" to the layout it is given.
+    function armenianLayer(layout) {
+        var en = layout.en || [];
+
+        // Search keyboard: {MIC} ... {BKSP} / {LANG} ... / {SIM} ... {SPACE}
+        if (en.length === 3 && en[0].indexOf('{BKSP}') >= 0 && en[1].indexOf('{LANG}') === 0) {
+            return [
+                (en[0].indexOf('{MIC}') === 0 ? '{MIC} ' : '') + ARMENIAN_ROWS[0] + ' {BKSP}',
+                '{LANG} ' + ARMENIAN_ROWS[1],
+                ARMENIAN_ROWS[2],
+                '{SIM} ' + ARMENIAN_ROWS[3] + ' {SPACE}'
+            ];
+        }
+
+        // Clarify keyboard: digits / three letter rows / {MIC} {LANG} {SPACE} {SEARCH}
+        if (en.length === 5 && en[4].indexOf('{LANG}') >= 0) {
+            return [en[0]].concat(ARMENIAN_ROWS).concat([en[4]]);
+        }
+
+        return null;
+    }
+
+    function addArmenianKeyboard() {
+        var holder = window.SimpleKeyboard;
+        var Original = holder && holder['default'];
+
+        if (!Original || Original.hayfilms_wrapped) return;
+
+        var Wrapped = function () {
+            var args = Array.prototype.slice.call(arguments);
+            var options = args[args.length - 1];
+
+            try {
+                if (options && options.layout && !options.layout.hy) {
+                    var layer = armenianLayer(options.layout);
+
+                    if (layer) options.layout.hy = layer;
+                }
+            }
+            catch (e) {}
+
+            return new (Function.prototype.bind.apply(Original, [null].concat(args)))();
+        };
+
+        Wrapped.prototype = Original.prototype;
+        Wrapped.hayfilms_wrapped = true;
+
+        for (var key in Original) {
+            if (Original.hasOwnProperty(key)) Wrapped[key] = Original[key];
+        }
+
+        holder['default'] = Wrapped;
+
+        // The keyboard's language button lists Lampa's language codes that have a layout.
+        if (Lampa.Lang.addCodes && !Lampa.Lang.codes().hy) Lampa.Lang.addCodes({ hy: 'Հայերեն' });
+    }
+
     function start() {
         registerSource();
         addSettings();
@@ -1384,6 +1472,8 @@
         Lampa.Listener.follow('full', function (event) {
             if (event.type === 'complite') addButton(event);
         });
+
+        try { addArmenianKeyboard(); } catch (e) {}
 
         Lampa.Player.listener.follow('destroy', function () {
             setNoReferrer(false);
