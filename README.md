@@ -21,3 +21,26 @@ https://aaramg.github.io/lampa-channels/channels.js
 ```
 
 Built for Lampa 3.x and written in ES5, so it runs on older Android TV WebViews.
+
+# HayFilms plugin for Lampa
+
+Adds a **HayFilms** side-menu item that browses [hayfilms.com](https://hayfilms.com): Armenian films and
+series, old Armenian films, and films, series, doramas and cartoons dubbed into Armenian. The site's
+Russian-language sections are left out, because Lampa already covers them.
+
+- Rows per section, new arrivals, genre rows, and a **Ժանրեր** row of genre tiles plus **Ֆիլտր**
+  (section → genre → decade)
+- A **HayFilms** tab in Lampa's search
+- A **HayFilms** button on the card plays the page's best stream: HD mp4 (up to 1080p), YouTube, ArmDB or OK.
+  Series open an episode list that marks watched episodes and remembers the last one
+- Settings → HayFilms: open YouTube videos in the YouTube app (default on Android, always full quality)
+  or in Lampa's player
+
+Install: Settings → Extensions → Add plugin →
+
+```
+https://aaramg.github.io/lampa-channels/hayfilms.js
+```
+
+The site has no API, so the plugin reads its HTML through Lampa's native Android request, which CORS
+doesn't apply to. If the site changes its markup, the parser needs updating.
