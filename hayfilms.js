@@ -1398,12 +1398,13 @@
 
     /* ---------- Armenian keyboard ---------- */
 
-    // Phonetic layout, like the Armenian phonetic keyboard on phones; all 38 letters and և.
+    // Armenian Phonetic, key for key (xkb "am phonetic"): the digit-row letters on top, then the
+    // QWERTY rows (ք=Q ո=W ... խ=[ ծ=], ա=A ... լ=L շ=\, զ=Z ... մ=M). All 38 letters and և.
     var ARMENIAN_ROWS = [
-        'է թ փ ձ ջ ր չ ճ ժ ծ',
-        'ք ո ե ռ տ ը ւ ի օ պ խ',
+        'է թ փ ձ ջ և ր չ ճ ժ',
+        'ք ո ե ռ տ ը ւ ի օ պ խ ծ',
         'ա ս դ ֆ գ հ յ կ լ շ',
-        'զ ղ ց վ բ ն մ և .'
+        'զ ղ ց վ բ ն մ'
     ];
 
     // Lampa's keyboard takes its layouts from a list we can't reach, but it builds a fresh
