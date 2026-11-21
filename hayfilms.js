@@ -973,17 +973,29 @@
             return;
         }
 
+        // Lampa keeps only its own card fields in history and bookmarks (Utils.clearCard), so a card
+        // opened from there has lost hf_url; the site still finds the page by its id.
+        if (!card.hf_url && card.id > ID_OFFSET) {
+            card.hf_id = card.id - ID_OFFSET;
+            card.hf_url = SITE + '/index.php?newsid=' + card.hf_id;
+        }
+
         if (!card.hf_url) return onerror();
 
         fetchText(card.hf_url, function (text) {
             var parsed = parseDetail(text, card.hf_url);
 
-            playersById[parsed.card.hf_id] = parsed.players;
-
             // Keep what the listing knew if the page lacks it (e.g. the poster).
             for (var key in card) {
                 if (parsed.card[key] === undefined || parsed.card[key] === '') parsed.card[key] = card[key];
             }
+
+            // A newsid link carries no id in its path; the card's own id is the reliable one.
+            parsed.card.id = card.id || parsed.card.id;
+            parsed.card.hf_id = card.hf_id || parsed.card.hf_id;
+            parsed.card.hf_url = card.hf_url;
+
+            playersById[parsed.card.hf_id] = parsed.players;
 
             // The episode badge suits a poster; the card page would show it as "Quality".
             parsed.card.release_quality = '';
@@ -1260,6 +1272,9 @@
 
     function playEpisodes(card, episodes, index) {
         var episode = episodes[index];
+
+        // Lampa adds only torrents to History by itself; online sources add what they play.
+        try { Lampa.Favorite.add('history', card, 100); } catch (e) {}
 
         Lampa.Loading.start(function () {
             Lampa.Loading.stop();
