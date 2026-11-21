@@ -527,22 +527,88 @@
     // Page counts seen per listing, so merged listings stop asking for pages a listing doesn't have.
     var listingTotals = {};
 
+    // Requests from the TV are slow (a page of rows takes ~20 s), so parsed listing pages are kept
+    // on the device: a page under STALE_MS is used as is, an older one (up to KEEP_MS) is shown
+    // at once and re-read in the background for next time.
+    var LISTINGS_KEY = 'hayfilms_listings';
+    var STALE_MS = 1000 * 60 * 60;
+    var KEEP_MS = 1000 * 60 * 60 * 24 * 2;
+    var MAX_LISTINGS = 160;
+    var listings = null;
+    var saveTimer = 0;
+
+    function storedListings() {
+        if (!listings) {
+            listings = Lampa.Storage.get(LISTINGS_KEY, '{}') || {};
+
+            if (typeof listings === 'string') {
+                try { listings = JSON.parse(listings); } catch (e) { listings = {}; }
+            }
+        }
+
+        return listings;
+    }
+
+    function saveListings() {
+        clearTimeout(saveTimer);
+
+        saveTimer = setTimeout(function () {
+            var all = storedListings();
+            var urls = Object.keys(all).filter(function (url) { return Date.now() - all[url].time < KEEP_MS; });
+
+            urls.sort(function (a, b) { return all[b].time - all[a].time; });
+
+            var kept = {};
+
+            urls.slice(0, MAX_LISTINGS).forEach(function (url) { kept[url] = all[url]; });
+
+            listings = kept;
+            Lampa.Storage.set(LISTINGS_KEY, kept);
+        }, 2000);
+    }
+
+    function readListing(base, page, done) {
+        var url = pagedUrl(base, page);
+
+        fetchText(url, function (text) {
+            var doc = parseHtml(text);
+            var answer = { results: parseCards(doc), total_pages: Math.max(parseTotalPages(doc), page) };
+
+            storedListings()[url] = { time: Date.now(), results: answer.results, total_pages: answer.total_pages };
+            saveListings();
+            done(answer);
+        }, function () {
+            // A genre or year with no titles answers 404.
+            var answer = { results: [], total_pages: page === 1 ? 0 : page - 1 };
+
+            storedListings()[url] = { time: Date.now(), results: [], total_pages: answer.total_pages };
+            saveListings();
+            done(answer);
+        });
+    }
+
     function fetchListing(base, page, done) {
         if (listingTotals[base] !== undefined && page > listingTotals[base]) {
             return setTimeout(function () { done({ results: [], total_pages: listingTotals[base] }); }, 0);
         }
 
-        fetchText(pagedUrl(base, page), function (text) {
-            var doc = parseHtml(text);
-            var total = Math.max(parseTotalPages(doc), page);
+        var finish = function (answer) {
+            listingTotals[base] = answer.total_pages;
+            done(answer);
+        };
 
-            listingTotals[base] = total;
-            done({ results: parseCards(doc), total_pages: total });
-        }, function () {
-            // A genre or year with no titles answers 404.
-            if (page === 1) listingTotals[base] = 0;
-            done({ results: [], total_pages: 0 });
-        });
+        var kept = storedListings()[pagedUrl(base, page)];
+        var age = kept ? Date.now() - kept.time : Infinity;
+
+        if (age < KEEP_MS) {
+            setTimeout(function () { finish({ results: kept.results, total_pages: kept.total_pages }); }, 0);
+
+            if (age >= STALE_MS) readListing(base, page, function () {});
+
+            return;
+        }
+
+        readListing(base, page, finish);
     }
 
     function gather(tasks, done) {
@@ -855,7 +921,8 @@
         });
 
         function loadPart(partLoaded, partEmpty) {
-            Lampa.Api.partNext(rows, 4, partLoaded, partEmpty);
+            // Two rows fill the first screen; the rest load as the viewer scrolls.
+            Lampa.Api.partNext(rows, 2, partLoaded, partEmpty);
         }
 
         loadPart(oncomplite, onerror);
