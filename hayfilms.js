@@ -1,9 +1,11 @@
 /*
  * HayFilms — Lampa plugin
- * Browses hayfilms.com (Armenian films and series, and films dubbed into Armenian) inside Lampa:
- * a side-menu page of rows, genre tiles and a filter, a search tab, and a "HayFilms" button on the
- * card that plays the best stream the page offers (csst/fsst mp4 up to 1080p, YouTube, armdb, ok.ru).
- * The site has no API, so pages are fetched as HTML (native Android request, so CORS doesn't apply).
+ * Browses two Armenian sites as one catalogue inside Lampa: hayfilms.com and armfilm.co (Armenian
+ * films and series, and films, series and cartoons dubbed into Armenian). A side-menu page of rows,
+ * genre tiles and a filter, a search tab, and a "HayFilms" button on the card that plays the best
+ * stream either site offers (csst/fsst mp4 up to 1080p, YouTube, armdb HLS, ok.ru). A title both
+ * sites have shows once, with the streams of both.
+ * The sites have no API, so pages are fetched as HTML (native Android request, so CORS doesn't apply).
  * Targets Lampa 3.x. Written in ES5 for old Android TV WebViews (Crosswalk).
  */
 (function () {
@@ -14,21 +16,30 @@
 
     var SOURCE = 'hayfilms';
     var SITE = 'https://hayfilms.com';
-    // Lampa keys history, bookmarks and timelines by card id; keep ours clear of TMDB ids.
+    var AF_SITE = 'https://armfilm.co';
+    // Lampa keys history, bookmarks and timelines by card id; keep ours clear of TMDB ids,
+    // and the two sites' ids clear of each other.
     var ID_OFFSET = 900000000;
+    var AF_OFFSET = 910000000;
     var CACHE_MS = 1000 * 60 * 20;
     var PER_PAGE = 12;
 
-    // `am` is the Armenian site's slug (what we browse), `ru` the Russian one (what search returns).
+    // hayfilms.com: `am` is the Armenian site's slug (what we browse), `ru` the Russian one (what
+    // search returns). armfilm.co: `af` are its sections under /hy/ that fall in the category.
     var CATEGORIES = [
-        { id: 'arm_series', am: 'haykakan-serialner', ru: 'armyanskie-seriali', title: 'Հայկական սերիալներ' },
-        { id: 'arm_movies', am: 'haykakan-filmer', ru: 'armyanskie-filmi', title: 'Հայկական ֆիլմեր' },
-        { id: 'tr_series', am: 'serialner-hayeren-targmanutyamb', ru: 'seriali-na-armyanskom', title: 'Սերիալներ հայերեն թարգմանությամբ' },
-        { id: 'tr_movies', am: 'filmer-hayeren', ru: 'filmi-na-armyanskom', title: 'Ֆիլմեր հայերեն թարգմանությամբ' },
-        { id: 'dorama', am: 'doramaner-hayeren', ru: 'dorammi-na-armyanskom', title: 'Դորամաներ հայերեն' },
-        { id: 'cartoons', am: 'multfilmer-hayeren', ru: 'multfilmy-armjanskim-perevodom', title: 'Մուլտֆիլմեր հայերեն' },
-        { id: 'old', am: 'haykakan-hin-filmer', ru: 'armyanskie-starie-filmi', title: 'Հին հայկական ֆիլմեր' }
+        { id: 'arm_series', am: 'haykakan-serialner', ru: 'armyanskie-seriali', af: ['serialner'], title: 'Հայկական սերիալներ' },
+        { id: 'arm_movies', am: 'haykakan-filmer', ru: 'armyanskie-filmi', af: ['haykakan-filmer'], title: 'Հայկական ֆիլմեր' },
+        { id: 'tr_series', am: 'serialner-hayeren-targmanutyamb', ru: 'seriali-na-armyanskom', af: ['serialner-hayeren-tarkmanutyamb'], title: 'Սերիալներ հայերեն թարգմանությամբ' },
+        { id: 'tr_movies', am: 'filmer-hayeren', ru: 'filmi-na-armyanskom', af: ['hayeren-filmer', 'mijazgayin-filmer-hayeren-targmanutyamb'], title: 'Ֆիլմեր հայերեն թարգմանությամբ' },
+        { id: 'dorama', am: 'doramaner-hayeren', ru: 'dorammi-na-armyanskom', af: ['doramaner-hay'], title: 'Դորամաներ հայերեն' },
+        { id: 'cartoons', am: 'multfilmer-hayeren', ru: 'multfilmy-armjanskim-perevodom', af: ['hayeren-multer'], title: 'Մուլտֆիլմեր հայերեն' },
+        { id: 'arm_cartoons', af: ['multfilmer'], title: 'Հայկական մուլտֆիլմեր' },
+        { id: 'anime', af: ['animener-hayeren'], title: 'Անիմե հայերեն' },
+        { id: 'old', am: 'haykakan-hin-filmer', ru: 'armyanskie-starie-filmi', af: ['haykakan-hin-filmer'], title: 'Հին հայկական ֆիլմեր' }
     ];
+
+    // armfilm.co files every episode of an Armenian series as its own post; we show the series.
+    var AF_SERIES_SLUG = 'serialner';
 
     // Russian-language sections: Lampa already has all of that, so they never show.
     var EXCLUDED_SLUGS = ['filmrus', 'filmerrussern'];
@@ -76,6 +87,7 @@
         { title: 'Նոր ավելացված', query: {}, limit: 24 },
         { title: 'Մուլտֆիլմեր և մանկական', query: { kids: '1' } },
         { title: FAMILY_TITLE, query: { family: '1' } },
+        { cat: 'arm_cartoons' },
         { cat: 'arm_series' },
         { cat: 'arm_movies' },
         { tiles: true },
@@ -83,16 +95,20 @@
         { cat: 'tr_movies' },
         { cat: 'tr_series' },
         { cat: 'dorama' },
+        { cat: 'anime' },
         { cat: 'old' },
         { title: 'Ֆանտաստիկա', query: { genre: 'Ֆանտաստիկա' } },
         { title: 'Արկածային', query: { genre: 'Արկածային' } },
         { title: 'Պատմական', query: { genre: 'Պատմական' } }
     ];
 
-    // Stream hosts we can play, best first. Others on the site (VK, mail.ru, ...) are left out.
+    // Stream hosts we can play, best first. Others on the sites (VK, mail.ru, ...) are left out.
+    // An armfilm.co episode page is a host of its own: its player is read when the episode plays.
     var HOSTS = [
         { id: 'incvideo', name: 'HD', test: /(?:fsst|csst|incvideo\d*)\.online\/embed\//i },
         { id: 'youtube', name: 'YouTube', test: /youtube(?:-nocookie)?\.com\/embed\/|youtu\.be\//i },
+        { id: 'armdborg', name: 'ARMFilm', test: /armdb\.org\/player\//i },
+        { id: 'afpage', name: 'ARMFilm', test: /armfilm\.co\/.*\.html/i },
         { id: 'armdb', name: 'ArmDB', test: /armdb\.net\/embed\//i },
         { id: 'okru', name: 'OK', test: /ok\.ru\/videoembed\//i }
     ];
@@ -110,14 +126,47 @@
     // Players of each opened page, by site id. Kept out of the card, which Lampa saves in history.
     var playersById = {};
 
-    function absolute(url) {
+    function absolute(url, site) {
         if (!url) return '';
         if (url.indexOf('//') === 0) return 'https:' + url;
-        if (url.charAt(0) === '/') return SITE + url;
+        if (url.charAt(0) === '/') return (site || SITE) + url;
         return url;
     }
 
-    function fetchText(url, onload, onfail) {
+    // 'af' for armfilm.co, 'hf' for hayfilms.com.
+    function siteOf(url) {
+        return /armfilm\.co/i.test(url || '') ? 'af' : 'hf';
+    }
+
+    function cardSite(card) {
+        return card.hf_site || (card.id >= AF_OFFSET ? 'af' : 'hf');
+    }
+
+    // Pages are big (an armfilm.co listing is ~150 KB), so only the latest few stay in memory.
+    var PAGE_CACHE_MAX = 30;
+
+    // armfilm.co answers 503 to a burst of requests, so at most two go to it at a time, and a failed
+    // one is tried once more.
+    var AF_PARALLEL = 2;
+    var afActive = 0;
+    var afQueue = [];
+
+    function afSlot(run) {
+        if (afActive < AF_PARALLEL) {
+            afActive++;
+            run(function () {
+                afActive--;
+
+                var next = afQueue.shift();
+
+                if (next) afSlot(next);
+            });
+        }
+        else afQueue.push(run);
+    }
+
+    // `background`: the armfilm index crawl, which neither counts as busy nor fills the cache.
+    function fetchText(url, onload, onfail, background, retried) {
         var hit = pageCache[url];
 
         if (hit && Date.now() - hit.time < CACHE_MS) {
@@ -125,20 +174,68 @@
             return;
         }
 
+        if (siteOf(url) === 'af' && !retried) {
+            return afSlot(function (release) {
+                fetchText(url, function (text) {
+                    release();
+                    onload(text);
+                }, function (error) {
+                    setTimeout(function () {
+                        fetchText(url, function (text) {
+                            release();
+                            onload(text);
+                        }, function (again) {
+                            release();
+                            if (onfail) onfail(again);
+                        }, background, true);
+                    }, 1500);
+                }, background, true);
+            });
+        }
+
         var network = new Lampa.Reguest();
+        var settled = false;
+        var settle = function () {
+            if (settled) return false;
+
+            settled = true;
+            if (!background) busy--;
+            return true;
+        };
+
+        if (!background) busy++;
 
         network.timeout(20000);
         network.native(url, function (text) {
+            if (!settle()) return;
+
             if (typeof text !== 'string') text = text && text.responseText ? text.responseText : String(text || '');
 
-            pageCache[url] = { text: text, time: Date.now() };
+            if (!background) {
+                pageCache[url] = { text: text, time: Date.now() };
+                trimPageCache();
+            }
+
             onload(text);
         }, function (error) {
+            if (!settle()) return;
             if (onfail) onfail(error);
         }, false, {
             dataType: 'text',
             headers: { 'User-Agent': navigator.userAgent }
         });
+
+        // A request that never answers must not keep the index crawl waiting for good.
+        if (!background) setTimeout(settle, 25000);
+    }
+
+    function trimPageCache() {
+        var urls = Object.keys(pageCache);
+
+        if (urls.length <= PAGE_CACHE_MAX) return;
+
+        urls.sort(function (a, b) { return pageCache[a].time - pageCache[b].time; });
+        urls.slice(0, urls.length - PAGE_CACHE_MAX).forEach(function (url) { delete pageCache[url]; });
     }
 
     function parseHtml(text) {
@@ -197,10 +294,13 @@
     }
 
     function categoryOf(url) {
-        var slug = slugOf(url);
+        var af = siteOf(url) === 'af';
+        var slug = af ? ((url || '').match(/armfilm\.co\/(?:hy\/)?([^\/]+)\//) || [0, ''])[1] : slugOf(url);
 
         for (var i = 0; i < CATEGORIES.length; i++) {
-            if (CATEGORIES[i].am === slug || CATEGORIES[i].ru === slug) return CATEGORIES[i];
+            var category = CATEGORIES[i];
+
+            if (af ? (category.af || []).indexOf(slug) >= 0 : category.am === slug || category.ru === slug) return category;
         }
 
         return null;
@@ -223,6 +323,7 @@
         return {
             id: ID_OFFSET + id,
             hf_id: id,
+            hf_site: 'hf',
             hf_url: url,
             source: SOURCE,
             title: info.title,
@@ -233,6 +334,128 @@
             vote_average: 0,
             overview: ''
         };
+    }
+
+    // "Սպիտակ տան գրոհը [2013/ֆիլմ/հայերեն/12+]" -> title, year 2013, language հայերեն;
+    // "Գոյամարտ [սերիա 213 Full]" -> title Գոյամարտ, episode 213.
+    function parseAfTitle(raw) {
+        var text = clean(raw);
+        var bracket = (text.match(/\[([^\]]*)\]/) || [0, ''])[1];
+        var info = { year: '', lang: '', episode: 0 };
+
+        bracket.split('/').forEach(function (part) {
+            part = clean(part);
+
+            if (/^\d{4}$/.test(part)) info.year = part;
+            else if (/^(?:հայերեն|ռուսերեն|անգլերեն|ռուս|рус)/i.test(part)) info.lang = part;
+        });
+
+        var episode = bracket.match(/սերիա\s*(\d+)/i) || text.match(/սերիա\s*(\d+)/i);
+
+        if (episode) info.episode = parseInt(episode[1], 10);
+
+        info.title = clean(text.replace(/\[[^\]]*\]/g, '').split(/\s+\/\s+/)[0]);
+
+        return info;
+    }
+
+    function makeAfCard(url, rawTitle, poster) {
+        var info = parseAfTitle(rawTitle);
+        var id = siteId(url);
+
+        return {
+            id: AF_OFFSET + id,
+            hf_id: id,
+            hf_site: 'af',
+            hf_url: url,
+            source: SOURCE,
+            title: info.title,
+            original_title: info.title,
+            img: absolute(poster, AF_SITE),
+            release_date: info.year ? info.year + '-01-01' : '',
+            release_quality: info.episode ? 'սերիա ' + info.episode : '',
+            vote_average: 0,
+            overview: '',
+            hf_lang: info.lang,
+            hf_episode: info.episode
+        };
+    }
+
+    function isArmenianLanguage(lang) {
+        return !lang || /հայերեն/i.test(lang);
+    }
+
+    // armfilm.co listing: a "shortstory" block with a poster link, a title and fields such as
+    // "Թարգմանությունը: [Հայերեն]". Titles in another language are left out. In the Armenian series
+    // section every post is an episode; only the newest episode of each series stays, as the series.
+    function parseAfCards(doc, base) {
+        // Sections use <article class="shortstory"> or <div class="shortstory">; side carousels sit
+        // outside #dle-content.
+        var articles = doc.querySelectorAll('#dle-content .shortstory');
+
+        if (!articles.length) articles = doc.querySelectorAll('.shortstory');
+        // Only the whole section is grouped; a series' own section lists all its episodes.
+        var series = base === AF_SITE + '/hy/' + AF_SERIES_SLUG + '/';
+        var cards = [];
+        var seen = {};
+
+        for (var i = 0; i < articles.length; i++) {
+            var link = articles[i].querySelector('a.short-imgposter');
+            var img = link && link.querySelector('img');
+
+            if (!link || !img) continue;
+
+            var url = absolute(link.getAttribute('href'), AF_SITE);
+            var card = makeAfCard(url, img.getAttribute('title') || img.getAttribute('alt') || '', img.getAttribute('data-src') || img.getAttribute('src'));
+            var fields = articles[i].querySelectorAll('.short-fileds div');
+
+            for (var f = 0; f < fields.length; f++) {
+                if (/Թարգմանությ|Перевод/i.test(fields[f].textContent)) {
+                    var value = fields[f].querySelector('span');
+
+                    card.hf_lang = card.hf_lang || clean(value ? value.textContent : '').replace(/[\[\]]/g, '');
+                }
+            }
+
+            if (!siteId(url) || !card.title || !isArmenianLanguage(card.hf_lang)) continue;
+
+            var key = series && card.hf_episode ? 'series:' + titleKey(card.title) : url;
+
+            if (seen[key]) continue;
+
+            if (series && card.hf_episode) card.hf_series = true;
+
+            seen[key] = true;
+            cards.push(card);
+        }
+
+        return cards;
+    }
+
+    // Titles compared across the two sites: lower case, letters and digits only.
+    function titleKey(title) {
+        return (title || '').toLowerCase().replace(/[^0-9a-zա-ֆа-яё]+/g, '');
+    }
+
+    // The Latin name of a card, when it has one apart from its title ("Goyamart").
+    function latinKey(card) {
+        var key = titleKey(card.original_title);
+
+        return key && key !== titleKey(card.title) && /^[0-9a-z]+$/.test(key) ? key : '';
+    }
+
+    // The same title on both sites: same Armenian (or same Latin) name, and the same year when
+    // both know it.
+    function sameTitle(a, b) {
+        var armenian = titleKey(a.title) && titleKey(a.title) === titleKey(b.title);
+        var latin = latinKey(a) && latinKey(a) === latinKey(b);
+
+        if (!armenian && !latin) return false;
+
+        var ya = yearOf(a);
+        var yb = yearOf(b);
+
+        return !ya || !yb || ya === yb;
     }
 
     function parseCards(doc) {
@@ -282,6 +505,13 @@
         return null;
     }
 
+    // "Սերիա 12", "12", "սերիա 12 Full" -> 12; otherwise its place in the list.
+    function episodeNumber(title, index) {
+        var match = (title || '').match(/(\d+)/);
+
+        return match ? parseInt(match[1], 10) : index + 1;
+    }
+
     // Each player tab holds one film, or a series as a <select> or as episode buttons.
     function parsePlayers(doc) {
         var block = doc.querySelector('.pmovie__player.tabs-block');
@@ -316,6 +546,8 @@
             }
 
             episodes = episodes.filter(function (episode) { return hostOf(episode.url); });
+
+            episodes.forEach(function (episode, index) { episode.number = episodeNumber(episode.title, index); });
 
             if (!episodes.length) continue;
 
@@ -407,6 +639,100 @@
         return { card: card, players: players, related: related };
     }
 
+    function hostById(id) {
+        for (var i = 0; i < HOSTS.length; i++) {
+            if (HOSTS[i].id === id) return HOSTS[i];
+        }
+
+        return null;
+    }
+
+    // An armfilm.co page: a film with one player, a dubbed series whose episodes are pages of the post
+    // (a "sel_page" <select>), or one episode of an Armenian series, which links to the series section.
+    function parseAfDetail(text, url) {
+        var doc = parseHtml(text);
+        var h1 = doc.querySelector('h1.ftitle') || doc.querySelector('h1');
+        var og = doc.querySelector('meta[property="og:image"]');
+        var card = makeAfCard(url, h1 ? h1.textContent : '', og ? og.getAttribute('content') : '');
+        var fields = doc.querySelectorAll('.f-fields li');
+        var rows = {};
+        var seriesUrl = '';
+
+        for (var i = 0; i < fields.length; i++) {
+            var label = clean((fields[i].querySelector('small') || {}).textContent || '');
+            var value = fields[i].querySelector('span');
+            var valueText = clean(value ? value.textContent : '');
+
+            if (/Ռեժիս/.test(label)) rows.director = valueText;
+            else if (/Դերասան/.test(label)) rows.cast = valueText;
+            else if (/երկիր/.test(label)) rows.country = clean(valueText.split('|')[1] || '');
+            else if (/Թարգմանությ/.test(label)) card.hf_lang = valueText.replace(/[\[\]]/g, '');
+
+            var links = fields[i].querySelectorAll('a[href]');
+
+            for (var l = 0; l < links.length; l++) {
+                var href = absolute(links[l].getAttribute('href'), AF_SITE);
+
+                if (/\/serialner\/[a-z0-9_-]+\/$/i.test(href)) seriesUrl = href;
+            }
+        }
+
+        var heading = doc.querySelector('.maintitle');
+        var descr = doc.querySelector('.f-text');
+        var named = [heading ? heading.textContent : '', descr ? descr.textContent : ''].map(clean).filter(function (text) { return / \/ /.test(text); })[0] || '';
+        var latin = clean((named.split(/\s+\/\s+/)[1] || '').replace(/\b(?:seria|season|eterashrjan)\b.*$/i, '').replace(/[^A-Za-z0-9 .:'-].*$/, ''));
+
+        if (!latin && seriesUrl) latin = seriesUrl.replace(/\/$/, '').split('/').pop().replace(/-\d{4}$/, '').replace(/-/g, ' ');
+        if (latin) card.original_title = latin;
+
+        var overview = descr ? clean(descr.textContent.replace(/Ուղարկել նշագրություն/g, '')) : '';
+        var extra = [];
+
+        if (rows.director) extra.push('Ռեժիսոր՝ ' + rows.director);
+        if (rows.cast) extra.push('Դերերում՝ ' + rows.cast);
+
+        card.overview = overview + (extra.length ? '\n\n' + extra.join('\n') : '');
+        card.genres = [];
+        card.production_countries = rows.country ? [{ iso_3166_1: '', name: rows.country }] : [];
+        card.production_companies = [];
+        card.background_image = card.img;
+
+        var players = [];
+        var pages = doc.querySelectorAll('select.sel_page option[value]');
+        var episodes = [];
+
+        for (var p = 0; p < pages.length; p++) {
+            var pageUrl = absolute(pages[p].getAttribute('value'), AF_SITE);
+
+            if (pageUrl) episodes.push({ title: 'Սերիա ' + clean(pages[p].textContent), url: pageUrl, number: episodeNumber(pages[p].textContent, episodes.length) });
+        }
+
+        if (episodes.length) players.push({ label: 'ARMFilm', host: hostById('afpage'), episodes: episodes, series: true });
+        else if (!(card.hf_episode && seriesUrl)) {
+            var frame = afPlayerFrame(doc);
+
+            if (frame) players.push({ label: 'ARMFilm', host: hostOf(frame), episodes: [{ title: '', url: frame, number: 1 }], series: false });
+        }
+
+        if (episodes.length) card.number_of_episodes = episodes.length;
+
+        return { card: card, players: players, related: [], seriesUrl: card.hf_episode ? seriesUrl : '' };
+    }
+
+    // The page's own player: #activeplayer, else the first iframe of a host we can play.
+    function afPlayerFrame(doc) {
+        var frames = doc.querySelectorAll('iframe#activeplayer, iframe[src]');
+
+        for (var i = 0; i < frames.length; i++) {
+            var src = absolute(frames[i].getAttribute('src') || frames[i].getAttribute('data-src') || '', AF_SITE);
+            var host = src && hostOf(src);
+
+            if (host && host.id !== 'afpage') return src;
+        }
+
+        return '';
+    }
+
     /* ---------- listings ---------- */
 
     // A listing query is kept in the activity url, e.g. "cat=haykakan-serialner&genre=Դրամա&decade=2010".
@@ -473,21 +799,33 @@
         return bases;
     }
 
-    // Site listings that answer the query, before the client-side filters.
+    // The listings of a category on both sites.
+    function categoryBases(category) {
+        var bases = category.am ? [SITE + '/am/' + category.am + '/'] : [];
+
+        (category.af || []).forEach(function (slug) { bases.push(AF_SITE + '/hy/' + slug + '/'); });
+
+        return bases;
+    }
+
+    // Site listings that answer the query, before the client-side filters. Genres and years exist
+    // only on hayfilms.com (armfilm.co files titles by country), so those read hayfilms alone.
     function listingBases(query) {
         var genre = genreByTitle(query.genre);
         var category = categoryById(query.cat);
 
-        // Cartoons section plus everything tagged cartoon or children's, whatever its section.
+        // Cartoon sections plus everything tagged cartoon or children's, whatever its section.
         if (query.kids) {
-            return [SITE + '/am/' + categoryById('cartoons').am + '/'].concat(genreBases(['Մուլտֆիլմ', 'Մանկական']));
+            return categoryBases(categoryById('cartoons'))
+                .concat(categoryBases(categoryById('arm_cartoons')))
+                .concat(genreBases(['Մուլտֆիլմ', 'Մանկական']));
         }
 
         if (query.family) return genreBases(FAMILY_GENRES);
 
         if (genre) return genreBases([genre.title]);
 
-        if (category) return [SITE + '/am/' + category.am + '/'];
+        if (category) return categoryBases(category);
 
         if (query.decade) {
             var years = [];
@@ -498,7 +836,11 @@
             return years;
         }
 
-        return CATEGORIES.map(function (item) { return SITE + '/am/' + item.am + '/'; });
+        var all = [];
+
+        CATEGORIES.forEach(function (item) { all = all.concat(categoryBases(item)); });
+
+        return all;
     }
 
     function yearOf(card) {
@@ -506,7 +848,7 @@
     }
 
     function passesFilters(card, query) {
-        if (query.family && grownUp.ids[card.hf_id]) return false;
+        if (query.family && cardSite(card) === 'hf' && grownUp.ids[card.hf_id]) return false;
 
         if (query.cat && query.genre) {
             var category = categoryOf(card.hf_url);
@@ -572,18 +914,18 @@
 
         fetchText(url, function (text) {
             var doc = parseHtml(text);
-            var answer = { results: parseCards(doc), total_pages: Math.max(parseTotalPages(doc), page) };
+            var af = siteOf(base) === 'af';
+            var answer = { results: af ? parseAfCards(doc, base) : parseCards(doc), total_pages: Math.max(parseTotalPages(doc), page) };
+
+            if (af) indexAdd(answer.results);
 
             storedListings()[url] = { time: Date.now(), results: answer.results, total_pages: answer.total_pages };
             saveListings();
             done(answer);
         }, function () {
-            // A genre or year with no titles answers 404.
-            var answer = { results: [], total_pages: page === 1 ? 0 : page - 1 };
-
-            storedListings()[url] = { time: Date.now(), results: [], total_pages: answer.total_pages };
-            saveListings();
-            done(answer);
+            // A genre or year with no titles answers 404; a busy site answers 503. Neither is kept, so
+            // a page that failed is read again next time.
+            done({ results: [], total_pages: page === 1 ? 0 : page - 1 });
         });
     }
 
@@ -702,18 +1044,26 @@
         });
     }
 
-    // Reads site pages from `from` on, every base listing at once, merged newest first. When the
-    // filters thin a page out it reads on (a few pages at most) until there's a screenful.
+    // Reads site pages from `from` on, every base listing of both sites at once. Each site's cards are
+    // ordered newest first (ids only compare within a site), then the two sites take turns, so neither
+    // buries the other. A title both sites have shows once: the later one is folded into the first as
+    // hf_alt, which the card page uses for the other site's streams. `memo` (the activity, for grids)
+    // carries the titles already shown across pages. When the filters thin a page out it reads on
+    // (a few pages at most) until there's a screenful.
     // Answers {results, last: the last site page read, total: the site's page count}.
-    function queryPages(query, from, done) {
+    function queryPages(query, from, done, memo) {
         var bases = listingBases(query);
         var seen = {};
-        var results = [];
+        var bySite = { hf: [], af: [] };
+        var shown = 0;
         var total = 0;
         var page = from;
 
+        memo = memo || {};
+        memo.hf_titles = memo.hf_titles || {};
+
         if (query.family && Date.now() - grownUp.time >= GROWN_UP_LIFE) {
-            if (!grownUpReady()) return waitGrownUp(function () { queryPages(query, from, done); });
+            if (!grownUpReady()) return waitGrownUp(function () { queryPages(query, from, done, memo); });
 
             loadGrownUp();
         }
@@ -726,25 +1076,228 @@
                     total = Math.max(total, answer.total_pages);
 
                     answer.results.forEach(function (card) {
-                        if (seen[card.hf_id] || !passesFilters(card, query)) return;
+                        if (seen[card.id] || !passesFilters(card, query)) return;
 
-                        seen[card.hf_id] = true;
-                        results.push(card);
+                        seen[card.id] = true;
+                        bySite[cardSite(card)].push(card);
+                        shown++;
                     });
                 });
 
-                if (results.length < PER_PAGE && page < total && page - from < 4) {
+                if (shown < PER_PAGE && page < total && page - from < 4) {
                     page++;
                     return read();
                 }
 
-                if (bases.length > 1) results.sort(function (a, b) { return b.hf_id - a.hf_id; });
-
-                done({ results: results, last: page, total: Math.max(total, page) });
+                done({ results: mergeSites(bySite, memo.hf_titles), last: page, total: Math.max(total, page) });
             });
         }
 
         read();
+    }
+
+    /* ---------- armfilm.co index ---------- */
+
+    // armfilm.co's own search is Google's, out of our reach, so the plugin keeps a list of the
+    // site's titles on the device: every armfilm listing read adds to it, and once a week it reads
+    // the sections through in the background, one page at a time and only while nothing else is
+    // loading (requests from the TV may queue one behind another). It answers search and finds a
+    // hayfilms title's twin on armfilm.co. Entries: id -> [title, year, url path, poster path, badge].
+    var AF_INDEX_KEY = 'hayfilms_af_index';
+    var AF_INDEX_LIFE = 1000 * 60 * 60 * 24 * 7;
+    var AF_SERIES_PAGES = 5;
+    var AF_IMG = 'https://amimg.intrdb.com/uploads/posts/';
+    var afIndex = null;
+    var afIndexTimer = 0;
+    var afCrawling = false;
+    var busy = 0;
+
+    function storedAfIndex() {
+        if (!afIndex) {
+            var stored = Lampa.Storage.get(AF_INDEX_KEY, '{}') || {};
+
+            if (typeof stored === 'string') {
+                try { stored = JSON.parse(stored); } catch (e) { stored = {}; }
+            }
+
+            afIndex = { time: stored.time || 0, items: stored.items || {} };
+        }
+
+        return afIndex;
+    }
+
+    // The index is a few hundred KB of JSON: written at most every 20 s, and once when a crawl ends.
+    function saveAfIndex(now) {
+        clearTimeout(afIndexTimer);
+
+        afIndexTimer = setTimeout(function () {
+            Lampa.Storage.set(AF_INDEX_KEY, storedAfIndex());
+        }, now ? 0 : 20000);
+    }
+
+    function indexAdd(cards) {
+        var items = storedAfIndex().items;
+        var changed = false;
+
+        cards.forEach(function (card) {
+            if (cardSite(card) !== 'af' || !card.hf_id || (card.hf_episode && !card.hf_series)) return;
+
+            var entry = [
+                card.title,
+                yearOf(card) || 0,
+                card.hf_url.replace(AF_SITE, ''),
+                (card.img || '').replace(AF_IMG, '~'),
+                card.release_quality || ''
+            ];
+
+            if (JSON.stringify(items[card.hf_id]) !== JSON.stringify(entry)) {
+                items[card.hf_id] = entry;
+                changed = true;
+            }
+        });
+
+        if (changed) saveAfIndex();
+    }
+
+    function indexCard(id) {
+        var entry = storedAfIndex().items[id];
+
+        if (!entry) return null;
+
+        return {
+            id: AF_OFFSET + parseInt(id, 10),
+            hf_id: parseInt(id, 10),
+            hf_site: 'af',
+            hf_url: AF_SITE + entry[2],
+            source: SOURCE,
+            title: entry[0],
+            original_title: entry[0],
+            img: entry[3].charAt(0) === '~' ? AF_IMG + entry[3].slice(1) : entry[3],
+            release_date: entry[1] ? entry[1] + '-01-01' : '',
+            release_quality: entry[4] || '',
+            vote_average: 0,
+            overview: ''
+        };
+    }
+
+    function searchAfIndex(text) {
+        var words = text.toLowerCase().split(/\s+/).map(titleKey).filter(function (word) { return word.length > 1; });
+        var items = storedAfIndex().items;
+        var found = [];
+
+        if (!words.length) return found;
+
+        for (var id in items) {
+            var key = titleKey(items[id][0]);
+
+            if (words.every(function (word) { return key.indexOf(word) >= 0; })) found.push(indexCard(id));
+        }
+
+        return newestFirst(found).slice(0, 60);
+    }
+
+    function findAfTwin(card) {
+        var items = storedAfIndex().items;
+        var key = titleKey(card.title);
+
+        for (var id in items) {
+            if (titleKey(items[id][0]) !== key) continue;
+
+            var twin = indexCard(id);
+
+            if (sameTitle(card, twin)) return twin;
+        }
+
+        return null;
+    }
+
+    // Reads every armfilm.co section (the Armenian series section only its first pages: older posts
+    // there are single episodes) into the index, politely, in the background.
+    function crawlAfIndex() {
+        if (afCrawling || Date.now() - storedAfIndex().time < AF_INDEX_LIFE) return;
+
+        afCrawling = true;
+
+        var queue = [];
+
+        CATEGORIES.forEach(function (category) {
+            (category.af || []).forEach(function (slug) {
+                queue.push({ base: AF_SITE + '/hy/' + slug + '/', page: 1, last: slug === AF_SERIES_SLUG ? AF_SERIES_PAGES : 0 });
+            });
+        });
+
+        function next() {
+            if (busy > 0) return setTimeout(next, 1500);
+
+            var job = queue.shift();
+
+            if (!job) {
+                storedAfIndex().time = Date.now();
+                saveAfIndex(true);
+                afCrawling = false;
+                return;
+            }
+
+            fetchText(pagedUrl(job.base, job.page), function (text) {
+                var doc = parseHtml(text);
+                var total = parseTotalPages(doc);
+
+                indexAdd(parseAfCards(doc, job.base));
+
+                if (job.page === 1) {
+                    var last = job.last ? Math.min(job.last, total) : total;
+
+                    for (var page = 2; page <= last; page++) queue.push({ base: job.base, page: page });
+                }
+
+                setTimeout(next, 300);
+            }, function () {
+                setTimeout(next, 300);
+            }, true);
+        }
+
+        setTimeout(next, 15000);
+    }
+
+    function newestFirst(cards) {
+        return cards.slice().sort(function (a, b) { return b.hf_id - a.hf_id; });
+    }
+
+    // hayfilms, armfilm, hayfilms, ... with one card per title (each site newest first, or as given with
+    // keepOrder, for search results). A twin on this page is folded into its
+    // card; `titles` (small: site and year per title key) drops twins of cards shown on earlier pages.
+    function mergeSites(bySite, titles, keepOrder) {
+        var hf = keepOrder ? bySite.hf : newestFirst(bySite.hf);
+        var af = keepOrder ? bySite.af : newestFirst(bySite.af);
+        var results = [];
+        var here = {};
+        var length = Math.max(hf.length, af.length);
+
+        function add(card) {
+            var key = titleKey(card.title);
+            var twin = here[key];
+            var before = titles[key];
+            var year = yearOf(card);
+
+            if (twin && twin.hf_site !== card.hf_site && sameTitle(twin, card)) {
+                if (!twin.hf_alt) twin.hf_alt = { id: card.id, hf_id: card.hf_id, url: card.hf_url, site: card.hf_site };
+                return;
+            }
+
+            if (!twin && before && before.site !== card.hf_site && (!before.year || !year || before.year === year)) return;
+
+            if (!twin) here[key] = card;
+            if (key && !before) titles[key] = { site: card.hf_site, year: year };
+
+            results.push(card);
+        }
+
+        for (var i = 0; i < length; i++) {
+            if (hf[i]) add(hf[i]);
+            if (af[i]) add(af[i]);
+        }
+
+        return results;
     }
 
     // The site also matches descriptions ("Հարրի" finds films that mention Harry), newest first;
@@ -909,7 +1462,7 @@
             else oncomplite(json);
         };
 
-        if (query.search) return searchPage(query.search, page, finish);
+        if (query.search) return searchBoth(query.search, page, finish);
 
         // Lampa counts its own pages; the site pages already read are remembered on the activity.
         // Lampa keeps the first answer's total_pages for good (category next.js), so that must be
@@ -924,10 +1477,25 @@
             params.hf_next = answer.last + 1;
 
             finish({ results: answer.results, page: page, total_pages: Math.max(answer.total, page) });
-        });
+
+            // Lampa asks for the next page only once the viewer reaches the end of the grid. Read the
+            // next two now, in the background, into the listing store, so they're there the moment
+            // they're asked for and the grid just goes on (pages already stored cost nothing).
+            setTimeout(function () { prefetch(query, answer.last + 1, answer.total, 2); }, 500);
+        }, params);
+    }
+
+    function prefetch(query, from, total, pages) {
+        if (pages < 1 || from > total) return;
+
+        queryPages(query, from, function (answer) {
+            prefetch(query, answer.last + 1, answer.total, pages - 1);
+        }, {});
     }
 
     function main(params, oncomplite, onerror) {
+        crawlAfIndex();
+
         var rows = MAIN_ROWS.map(function (row) {
             if (row.tiles) return function (call) { call(tilesRow()); };
 
@@ -958,6 +1526,84 @@
         return loadPart;
     }
 
+    // One site's page for a card: {card, players, related}. An armfilm.co Armenian series episode
+    // brings the episodes of the whole series.
+    function loadDetail(site, url, done, fail) {
+        fetchText(url, function (text) {
+            if (site !== 'af') return done(parseDetail(text, url));
+
+            var parsed = parseAfDetail(text, url);
+
+            if (!parsed.seriesUrl) return done(parsed);
+
+            loadAfSeries(parsed.seriesUrl, function (episodes) {
+                if (episodes.length) {
+                    parsed.players = [{ label: 'ARMFilm', host: hostById('afpage'), episodes: episodes, series: true }];
+                    parsed.card.number_of_episodes = episodes.length;
+                }
+
+                done(parsed);
+            });
+        }, fail);
+    }
+
+    // Every episode of an armfilm.co Armenian series: all pages of its section, oldest first.
+    function loadAfSeries(base, done) {
+        fetchListing(base, 1, function (first) {
+            var tasks = [];
+
+            for (var page = 2; page <= first.total_pages; page++) {
+                tasks.push((function (number) {
+                    return function (next) { fetchListing(base, number, next); };
+                })(page));
+            }
+
+            gather(tasks, function (answers) {
+                var byNumber = {};
+
+                [first].concat(answers).forEach(function (answer) {
+                    answer.results.forEach(function (card) {
+                        var number = card.hf_episode;
+
+                        if (number && !byNumber[number]) byNumber[number] = { title: 'Սերիա ' + number, url: card.hf_url, number: number };
+                    });
+                });
+
+                done(Object.keys(byNumber).map(function (number) { return byNumber[number]; })
+                    .sort(function (a, b) { return a.number - b.number; }));
+            });
+        });
+    }
+
+    // The same title on the other site: the twin a listing folded in, else the armfilm index for a
+    // hayfilms card, else hayfilms' search (Armenian, then Latin name) for an armfilm card.
+    function findTwin(card, done) {
+        if (card.hf_alt && card.hf_alt.url) return done(card.hf_alt.site, card.hf_alt.url);
+
+        if (cardSite(card) === 'hf') {
+            var twin = findAfTwin(card);
+
+            return done(twin ? 'af' : '', twin ? twin.hf_url : '');
+        }
+
+        var names = [card.title];
+
+        if (latinKey(card)) names.push(card.original_title);
+
+        (function tryName() {
+            var name = names.shift();
+
+            if (!name) return done('', '');
+
+            searchPage(name, 1, function (json) {
+                var found = json.results.filter(function (other) { return sameTitle(card, other); })[0];
+
+                if (found) done('hf', found.hf_url);
+                else tryName();
+            });
+        })();
+    }
+
     function full(params, oncomplite, onerror) {
         var card = params.card || {};
 
@@ -973,44 +1619,94 @@
             return;
         }
 
+        var site = cardSite(card);
+
         // Lampa keeps only its own card fields in history and bookmarks (Utils.clearCard), so a card
-        // opened from there has lost hf_url; the site still finds the page by its id.
+        // opened from there has lost hf_url; both sites still find the page by its id.
         if (!card.hf_url && card.id > ID_OFFSET) {
-            card.hf_id = card.id - ID_OFFSET;
-            card.hf_url = SITE + '/index.php?newsid=' + card.hf_id;
+            card.hf_id = card.id - (site === 'af' ? AF_OFFSET : ID_OFFSET);
+            card.hf_url = (site === 'af' ? AF_SITE : SITE) + '/index.php?newsid=' + card.hf_id;
         }
 
         if (!card.hf_url) return onerror();
 
-        fetchText(card.hf_url, function (text) {
-            var parsed = parseDetail(text, card.hf_url);
+        loadDetail(site, card.hf_url, function (parsed) {
+            var movie = parsed.card;
 
             // Keep what the listing knew if the page lacks it (e.g. the poster).
             for (var key in card) {
-                if (parsed.card[key] === undefined || parsed.card[key] === '') parsed.card[key] = card[key];
+                if (movie[key] === undefined || movie[key] === '') movie[key] = card[key];
             }
 
             // A newsid link carries no id in its path; the card's own id is the reliable one.
-            parsed.card.id = card.id || parsed.card.id;
-            parsed.card.hf_id = card.hf_id || parsed.card.hf_id;
-            parsed.card.hf_url = card.hf_url;
+            movie.id = card.id || movie.id;
+            movie.hf_id = card.hf_id || movie.hf_id;
+            movie.hf_url = card.hf_url;
+            movie.hf_site = site;
 
-            playersById[parsed.card.hf_id] = parsed.players;
+            var answered = false;
 
-            // The episode badge suits a poster; the card page would show it as "Quality".
-            parsed.card.release_quality = '';
+            function answer(twin) {
+                if (answered) return;
 
-            oncomplite({
-                movie: parsed.card,
-                simular: parsed.related.length ? { results: parsed.related } : undefined
+                answered = true;
+
+                var players = parsed.players;
+
+                if (twin) {
+                    players = players.concat(twin.players);
+
+                    // The other site may know what this one doesn't (genres, a description).
+                    ['overview', 'genres', 'production_countries', 'img', 'background_image', 'release_date'].forEach(function (field) {
+                        var mine = movie[field];
+
+                        if (!mine || (mine.length === 0)) movie[field] = twin.card[field];
+                    });
+                }
+
+                players.sort(function (a, b) { return HOSTS.indexOf(a.host) - HOSTS.indexOf(b.host); });
+                playersById[movie.id] = players;
+
+                var episodes = episodeList(movie);
+
+                if (episodes.length > 1) movie.number_of_episodes = episodes.length;
+
+                // The episode badge suits a poster; the card page would show it as "Quality".
+                movie.release_quality = '';
+
+                oncomplite({
+                    movie: movie,
+                    simular: parsed.related.length ? { results: parsed.related } : undefined
+                });
+            }
+
+            // The other site's page is a bonus: a slow one must not hold the card back.
+            setTimeout(function () { answer(null); }, 12000);
+
+            findTwin(movie, function (twinSite, twinUrl) {
+                if (!twinSite || twinUrl === movie.hf_url) return answer(null);
+
+                loadDetail(twinSite, twinUrl, answer, function () { answer(null); });
             });
         }, onerror);
+    }
+
+    // hayfilms' own search plus the armfilm index, one card per title, best title matches first.
+    function searchBoth(text, page, done) {
+        crawlAfIndex();
+
+        searchPage(text, page, function (json) {
+            var af = page === 1 ? searchAfIndex(text) : [];
+
+            json.results = rankByTitle(mergeSites({ hf: json.results, af: af }, {}, true), text);
+            done(json);
+        });
     }
 
     function search(params, oncomplite) {
         var text = decodeURIComponent(params.query || '');
 
-        searchPage(text, 1, function (json) {
+        searchBoth(text, 1, function (json) {
             json.title = 'HayFilms';
             json.query = text;
             oncomplite(json.results.length ? [json] : []);
@@ -1194,7 +1890,51 @@
         done({ url: 'https://www.youtube.com/watch?v=' + id, youtube: id, best: 'YouTube' });
     }
 
-    var RESOLVERS = { incvideo: resolveIncvideo, armdb: resolveArmdb, okru: resolveOkru, youtube: resolveYoutube };
+    // armdb.org player (armfilm.co): Playerjs with file: atob("[480p]https://hls…/p_0.m3u8,[720p]…").
+    function resolveArmdbOrg(url, done, fail) {
+        fetchText(url, function (text) {
+            var encoded = pick(text, /atob\(\s*["']([A-Za-z0-9+\/=]+)["']\s*\)/);
+            var file = '';
+            var map = {};
+
+            try { file = encoded ? window.atob(encoded) : pick(text, /file\s*:\s*["'](https?:[^"']+)["']/); } catch (e) {}
+
+            if (!file) return fail();
+
+            file.split(',').forEach(function (part) {
+                var match = part.match(/^\s*\[([^\]]+)\]\s*(\S+)/);
+
+                if (match) map[match[1]] = match[2];
+                else if (/^\s*https?:/.test(part)) map.HLS = clean(part);
+            });
+
+            var stream = withQualities(map);
+
+            if (stream) done(stream);
+            else fail();
+        }, fail);
+    }
+
+    // An armfilm.co episode page: read its player, then resolve that.
+    function resolveAfPage(url, done, fail) {
+        fetchText(url, function (text) {
+            var frame = afPlayerFrame(parseHtml(text));
+            var host = frame && hostOf(frame);
+
+            if (!host || !RESOLVERS[host.id]) return fail();
+
+            RESOLVERS[host.id](frame, done, fail);
+        }, fail);
+    }
+
+    var RESOLVERS = {
+        incvideo: resolveIncvideo,
+        armdborg: resolveArmdbOrg,
+        afpage: resolveAfPage,
+        armdb: resolveArmdb,
+        okru: resolveOkru,
+        youtube: resolveYoutube
+    };
 
     // Tries the episode on each player in order (best host first) until one gives a stream.
     function resolveEpisode(sources, done, fail) {
@@ -1211,21 +1951,12 @@
         next();
     }
 
-    function episodeHash(card, index) {
-        return Lampa.Utils.hash([SOURCE, card.hf_id, index].join('_'));
-    }
+    // `key` is the episode number minus one (0 for a film), which for hayfilms series is the index
+    // the plugin used before armfilm.co joined, so watched marks carry over.
+    function episodeHash(card, key) {
+        var parts = cardSite(card) === 'af' ? [SOURCE, 'af', card.hf_id, key] : [SOURCE, card.hf_id, key];
 
-    // Episode i of every player that has it, best host first.
-    function episodeSources(players, index) {
-        var sources = [];
-
-        players.forEach(function (player) {
-            var episode = player.episodes[index];
-
-            if (episode) sources.push({ host: player.host, url: episode.url });
-        });
-
-        return sources;
+        return Lampa.Utils.hash(parts.join('_'));
     }
 
     function useYoutubeApp() {
@@ -1250,12 +1981,16 @@
         }
     }
 
-    function remember(card, index) {
-        Lampa.Storage.set('hayfilms_last_' + card.hf_id, index);
+    function lastKey(card) {
+        return 'hayfilms_last_' + (cardSite(card) === 'af' ? 'af_' : '') + card.hf_id;
+    }
+
+    function remember(card, key) {
+        Lampa.Storage.set(lastKey(card), key);
     }
 
     function lastWatched(card) {
-        var value = parseInt(Lampa.Storage.get('hayfilms_last_' + card.hf_id, '-1'), 10);
+        var value = parseInt(Lampa.Storage.get(lastKey(card), '-1'), 10);
         return isNaN(value) ? -1 : value;
     }
 
@@ -1282,9 +2017,9 @@
 
         resolveEpisode(episode.sources, function (stream) {
             Lampa.Loading.stop();
-            remember(card, index);
+            remember(card, episode.key);
 
-            var hash = episodeHash(card, index);
+            var hash = episodeHash(card, episode.key);
 
             if (stream.youtube && useYoutubeApp()) {
                 markWatched(hash);
@@ -1309,14 +2044,14 @@
 
                     var entry = {
                         title: card.title + ' — ' + other.title,
-                        timeline: Lampa.Timeline.view(episodeHash(card, position)),
+                        timeline: Lampa.Timeline.view(episodeHash(card, other.key)),
                         card: card
                     };
 
                     // Resolved when the viewer moves to it; stream links expire.
                     entry.url = function (call) {
                         resolveEpisode(other.sources, function (next) {
-                            remember(card, position);
+                            remember(card, other.key);
                             setNoReferrer(!!next.no_referrer);
                             entry.url = next.url;
                             entry.quality = next.quality || undefined;
@@ -1339,22 +2074,41 @@
         });
     }
 
+    // A film: one entry with every player's stream, best first. A series: one entry per episode
+    // number, with that episode from every player (both sites), best first; a lone film-player beside
+    // a series (a trailer, say) is left out.
     function episodeList(card) {
-        var players = playersById[card.hf_id] || [];
-        var count = 0;
+        var players = playersById[card.id] || [];
+        var series = players.filter(function (player) { return player.series; }).length > 0;
 
-        players.forEach(function (player) { count = Math.max(count, player.episodes.length); });
+        if (!series) {
+            var sources = [];
 
-        var titled = players.filter(function (player) { return player.series; })[0] || players[0];
-        var episodes = [];
+            players.forEach(function (player) {
+                if (player.episodes[0]) sources.push({ host: player.host, url: player.episodes[0].url });
+            });
 
-        for (var i = 0; i < count; i++) {
-            var named = titled && titled.episodes[i] && titled.episodes[i].title;
-
-            episodes.push({ title: named || ('Սերիա ' + (i + 1)), sources: episodeSources(players, i) });
+            return sources.length ? [{ title: '', key: 0, number: 1, sources: sources }] : [];
         }
 
-        return episodes;
+        var byNumber = {};
+
+        players.forEach(function (player) {
+            if (!player.series) return;
+
+            player.episodes.forEach(function (episode, index) {
+                var number = episode.number || index + 1;
+                var entry = byNumber[number];
+
+                if (!entry) entry = byNumber[number] = { title: episode.title || ('Սերիա ' + number), key: number - 1, number: number, sources: [] };
+
+                entry.sources.push({ host: player.host, url: episode.url });
+            });
+        });
+
+        return Object.keys(byNumber)
+            .map(function (number) { return byNumber[number]; })
+            .sort(function (a, b) { return a.number - b.number; });
     }
 
     function watch(card) {
@@ -1373,13 +2127,17 @@
         Lampa.Select.show({
             title: card.title,
             items: episodes.map(function (episode, index) {
-                var view = Lampa.Timeline.view(episodeHash(card, index));
-                var hosts = episode.sources.map(function (source) { return source.host.name; });
+                var view = Lampa.Timeline.view(episodeHash(card, episode.key));
+                var hosts = [];
+
+                episode.sources.forEach(function (source) {
+                    if (hosts.indexOf(source.host.name) < 0) hosts.push(source.host.name);
+                });
 
                 return {
                     title: (view.percent >= 90 ? '✓ ' : '') + episode.title,
                     subtitle: (view.percent > 0 && view.percent < 90 ? view.percent + '% · ' : '') + hosts.join(', '),
-                    selected: index === last,
+                    selected: episode.key === last,
                     index: index
                 };
             }),
@@ -1398,13 +2156,14 @@
 
         if (!card || card.source !== SOURCE || !card.hf_id) return;
 
+
         var render = event.body;
         var container = render.find('.buttons--container');
 
         if (!container.length || render.find('.view--hayfilms').length) return;
 
-        var best = (playersById[card.hf_id] || [])[0];
-        var button = $('<div class="full-start__button selector view--online view--hayfilms" data-subtitle="hayfilms.com">' +
+        var best = (playersById[card.id] || [])[0];
+        var button = $('<div class="full-start__button selector view--online view--hayfilms" data-subtitle="hayfilms.com · armfilm.co">' +
             ICON + '<span>HayFilms</span></div>');
 
         if (!best) button.addClass('hide');
@@ -1538,6 +2297,9 @@
     }
 
     function start() {
+        // For tests and troubleshooting from a console: what the card pages found.
+        window.hayfilms_debug = { players: playersById, episodes: episodeList, twin: findTwin };
+
         registerSource();
         addSettings();
         addMenu();
